@@ -1,139 +1,129 @@
-"""
-Pulse unit test for gate0_guard_check.py
+"""Tests for the Gate 0 runtime route guard configuration boundary."""
 
-This test verifies the guard script's output parsing and exit code behavior
-without importing any vendor code.
-"""
-
+import importlib.util
 import json
 import subprocess
 from pathlib import Path
 
+import pytest
 
-def get_repo_root():
-    """Get the repository root directory."""
-    return Path(__file__).parent.parent
-
-
-def get_vendor_openalgo_path():
-    """Get the path to vendor/openalgo.
-
-    In the worktree, vendor is in the main GitHub checkout.
-    On CI, vendor is in the repo root (full checkout).
-    """
-    # First check the repo root (CI case)
-    repo_root_path = get_repo_root() / "vendor" / "openalgo"
-    if repo_root_path.exists():
-        return repo_root_path
-
-    # Fall back to main GitHub checkout (local worktree case)
-    main_checkout = Path("/Users/suryavamsipichika/GitHub/Pulse/vendor/openalgo")
-    if main_checkout.exists():
-        return main_checkout
-
-    # Last resort: return repo root path (will fail with clear error)
-    return repo_root_path
+REPO_ROOT = Path(__file__).resolve().parents[1]
+GUARD_SCRIPT = REPO_ROOT / "scripts" / "gate0_guard_check.py"
 
 
-def get_script_path():
-    """Get the path to the guard check script."""
-    return get_repo_root() / "scripts" / "gate0_guard_check.py"
+def load_guard_module():
+    spec = importlib.util.spec_from_file_location("gate0_guard_check", GUARD_SCRIPT)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def run_guard_script():
-    """Run the guard script and return the result."""
-    script_path = get_script_path()
-    vendor_path = get_vendor_openalgo_path()
+def fake_vendor_path(root: Path) -> Path:
+    vendor_path = root / "openalgo"
+    vendor_path.mkdir(parents=True)
+    return vendor_path
 
-    result = subprocess.run(
-        ["uv", "run", "python", str(script_path)],
-        cwd=vendor_path,
-        capture_output=True,
-        text=True,
-        timeout=60,
+
+def test_env_path_is_used_before_repository_path(tmp_path, monkeypatch):
+    guard = load_guard_module()
+    env_vendor = fake_vendor_path(tmp_path / "env")
+    repo_vendor = tmp_path / "repo" / "vendor" / "openalgo"
+    repo_vendor.mkdir(parents=True)
+    monkeypatch.setenv("STYX_OPENALGO_PATH", str(env_vendor))
+
+    assert guard.resolve_vendor_path(tmp_path / "repo") == env_vendor.resolve()
+
+
+def test_repository_relative_vendor_path_is_used(tmp_path, monkeypatch):
+    guard = load_guard_module()
+    repo_vendor = tmp_path / "repo" / "vendor" / "openalgo"
+    repo_vendor.mkdir(parents=True)
+    monkeypatch.delenv("STYX_OPENALGO_PATH", raising=False)
+
+    assert guard.resolve_vendor_path(tmp_path / "repo") == repo_vendor.resolve()
+
+
+def test_running_from_vendor_directory_uses_current_directory(tmp_path, monkeypatch):
+    guard = load_guard_module()
+    vendor_path = fake_vendor_path(tmp_path)
+    monkeypatch.delenv("STYX_OPENALGO_PATH", raising=False)
+
+    assert guard.resolve_vendor_path(vendor_path) == vendor_path.resolve()
+
+
+def test_missing_vendor_path_fails_clearly(tmp_path, monkeypatch):
+    guard = load_guard_module()
+    monkeypatch.delenv("STYX_OPENALGO_PATH", raising=False)
+
+    with pytest.raises(guard.GuardConfigurationError, match="OpenAlgo vendor not found"):
+        guard.resolve_vendor_path(tmp_path)
+
+
+def test_invalid_explicit_vendor_path_does_not_fall_back(tmp_path, monkeypatch):
+    guard = load_guard_module()
+    repo_vendor = tmp_path / "vendor" / "openalgo"
+    repo_vendor.mkdir(parents=True)
+    monkeypatch.setenv("STYX_OPENALGO_PATH", str(tmp_path / "missing-openalgo"))
+
+    with pytest.raises(guard.GuardConfigurationError, match="STYX_OPENALGO_PATH"):
+        guard.resolve_vendor_path(tmp_path)
+
+
+def test_expected_vendor_revision_is_required(tmp_path):
+    guard = load_guard_module()
+    vendor_path = fake_vendor_path(tmp_path)
+    expected_revision = guard.EXPECTED_VENDOR_REVISION
+
+    def fake_git_runner(command, **kwargs):
+        assert command == ["git", "-C", str(vendor_path), "rev-parse", "HEAD"]
+        return subprocess.CompletedProcess(command, 0, f"{expected_revision}\n", "")
+
+    assert guard.require_expected_vendor_revision(vendor_path, runner=fake_git_runner) == (
+        expected_revision
     )
-    return result
 
 
-def test_gate0_guard_check_output_parsing():
-    """Test that the guard script outputs valid JSON lines with expected structure."""
-    result = run_guard_script()
+def test_wrong_vendor_revision_is_rejected(tmp_path):
+    guard = load_guard_module()
+    vendor_path = fake_vendor_path(tmp_path)
 
-    # Parse JSON lines
-    lines = result.stdout.strip().split("\n")
-    assert len(lines) == 5, f"Expected 5 JSON lines, got {len(lines)}"
+    def fake_git_runner(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0, "wrong-revision\n", "")
 
-    for line in lines:
-        data = json.loads(line)
-        assert "case" in data
-        assert "expected" in data
-        assert "observed" in data
-        assert "ok" in data
-        assert isinstance(data["ok"], bool)
-
-    # Verify all cases passed
-    for line in lines:
-        data = json.loads(line)
-        assert data["ok"] is True, f"Case {data['case']} failed: {data}"
-
-    # Verify exit code is 0
-    assert result.returncode == 0, f"Expected exit code 0, got {result.returncode}"
+    with pytest.raises(guard.GuardConfigurationError, match="revision mismatch"):
+        guard.require_expected_vendor_revision(vendor_path, runner=fake_git_runner)
 
 
-def test_gate0_guard_check_failing_case():
-    """Test that the guard script exits with non-zero on a failing case.
+def test_main_exits_one_for_wrong_vendor_revision(tmp_path, monkeypatch, capsys):
+    guard = load_guard_module()
+    vendor_path = fake_vendor_path(tmp_path)
+    monkeypatch.setenv("STYX_OPENALGO_PATH", str(vendor_path))
+    monkeypatch.setattr(guard, "get_vendor_revision", lambda path, runner=None: "wrong-revision")
 
-    We simulate a failure by checking that if we modify the expected values
-    to not match, the script would fail. Since we can't easily modify the
-    script's behavior without vendor imports, we verify the exit code logic
-    by checking that the script returns 0 when all cases pass (which they do).
-    """
-    result = run_guard_script()
-
-    # All cases should pass, so exit code should be 0
-    assert result.returncode == 0
-
-    # Verify all 5 cases are present
-    lines = result.stdout.strip().split("\n")
-    case_names = [json.loads(line)["case"] for line in lines]
-    expected_cases = [
-        "analyzer_on_placeorder",
-        "analyzer_on_placesmartorder",
-        "analyzer_on_basketorder",
-        "analyzer_on_splitorder",
-        "analyzer_off_placeorder_negative_control",
-    ]
-    assert case_names == expected_cases
+    assert guard.main() == 1
+    assert "revision mismatch" in capsys.readouterr().err
 
 
-def test_gate0_guard_check_negative_control():
-    """Verify the negative control case (Analyzer OFF) calls Fyers function.
+def test_main_exits_one_when_vendor_is_missing(tmp_path, monkeypatch, capsys):
+    guard = load_guard_module()
+    monkeypatch.setenv("STYX_OPENALGO_PATH", str(tmp_path / "missing-openalgo"))
 
-    This is the critical test that proves the guard can detect live calls.
-    If this case doesn't call Fyers, the test proves nothing.
-    """
-    result = run_guard_script()
-
-    lines = result.stdout.strip().split("\n")
-
-    # Find the negative control case
-    negative_control = None
-    for line in lines:
-        data = json.loads(line)
-        if data["case"] == "analyzer_off_placeorder_negative_control":
-            negative_control = data
-            break
-
-    assert negative_control is not None, "Negative control case not found"
-
-    # Verify it expects fyers=1 and observed fyers=1
-    assert "fyers=1" in negative_control["expected"]
-    assert "fyers=1" in negative_control["observed"]
-    assert negative_control["ok"] is True
+    assert guard.main() == 1
+    assert "OpenAlgo vendor not found" in capsys.readouterr().err
 
 
-if __name__ == "__main__":
-    test_gate0_guard_check_output_parsing()
-    test_gate0_guard_check_failing_case()
-    test_gate0_guard_check_negative_control()
-    print("All tests passed!")
+def test_json_output_records_vendor_revision(capsys):
+    guard = load_guard_module()
+
+    assert (
+        guard.emit_results(
+            [{"case": "example", "expected": "x", "observed": "x", "ok": True}],
+            guard.EXPECTED_VENDOR_REVISION,
+        )
+        == 0
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["vendor_revision"] == guard.EXPECTED_VENDOR_REVISION
