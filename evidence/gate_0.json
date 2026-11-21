@@ -139,12 +139,13 @@
       "status": "PASS",
       "command": "uv run python ~/dev/Pulse/scripts/gate0_guard_check.py",
       "execution_context": "The local worktree uses the configured OpenAlgo vendor checkout; the guard script resolves that checkout dynamically when vendor/openalgo is absent from the worktree.",
+      "cwd": "~/dev/Pulse/vendor/openalgo",
       "exit_code": 0,
-      "observed_on": "2026-11-22T02:47:05+05:30",
+      "observed_on": "2026-11-22T03:23:57+05:30",
       "run_by": "Surya",
       "run_where": "Surya's Mac",
       "vendor_revision": "a1b9e32506bce21403a8614dddeed0ab61fd519a",
-      "output": "{\"case\": \"analyzer_on_placeorder\", \"expected\": \"sandbox=1, fyers=0\", \"observed\": \"sandbox=1, fyers=0\", \"ok\": true}\n{\"case\": \"analyzer_on_placesmartorder\", \"expected\": \"sandbox=1, fyers=0\", \"observed\": \"sandbox=1, fyers=0\", \"ok\": true}\n{\"case\": \"analyzer_on_basketorder\", \"expected\": \"sandbox=1, fyers=0\", \"observed\": \"sandbox=1, fyers=0\", \"ok\": true}\n{\"case\": \"analyzer_on_splitorder\", \"expected\": \"sandbox=1, fyers=0\", \"observed\": \"sandbox=1, fyers=0\", \"ok\": true}\n{\"case\": \"analyzer_off_placeorder_negative_control\", \"expected\": \"sandbox=0, fyers=1\", \"observed\": \"sandbox=0, fyers=1\", \"ok\": true}\nwarning: `VIRTUAL_ENV=~/dev/Pulse/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead",
+      "output": "{\"case\": \"analyzer_on_placeorder\", \"expected\": \"sandbox=1, fyers=0\", \"observed\": \"sandbox=1, fyers=0\", \"ok\": true, \"vendor_revision\": \"a1b9e32506bce21403a8614dddeed0ab61fd519a\"}\n{\"case\": \"analyzer_on_placesmartorder\", \"expected\": \"sandbox=1, fyers=0\", \"observed\": \"sandbox=1, fyers=0\", \"ok\": true, \"vendor_revision\": \"a1b9e32506bce21403a8614dddeed0ab61fd519a\"}\n{\"case\": \"analyzer_on_basketorder\", \"expected\": \"sandbox=1, fyers=0\", \"observed\": \"sandbox=1, fyers=0\", \"ok\": true, \"vendor_revision\": \"a1b9e32506bce21403a8614dddeed0ab61fd519a\"}\n{\"case\": \"analyzer_on_splitorder\", \"expected\": \"sandbox=1, fyers=0\", \"observed\": \"sandbox=1, fyers=0\", \"ok\": true, \"vendor_revision\": \"a1b9e32506bce21403a8614dddeed0ab61fd519a\"}\n{\"case\": \"analyzer_off_placeorder_negative_control\", \"expected\": \"sandbox=0, fyers=1\", \"observed\": \"sandbox=0, fyers=1\", \"ok\": true, \"vendor_revision\": \"a1b9e32506bce21403a8614dddeed0ab61fd519a\"}\n",
       "cases": [
         {
           "case": "analyzer_on_placeorder",
@@ -209,7 +210,7 @@
       "status": "VERIFIED",
       "documented_read": "GET /sandbox/api/configs",
       "source": "vendor/openalgo/blueprints/sandbox.py:104-212",
-      "actual_browser_result": "starting_capital: 100000  equity_mis_leverage: 1  equity_cnc_leverage: 1",
+      "observed_values": "starting_capital: 100000  equity_mis_leverage: 1  equity_cnc_leverage: 1",
       "observed_by": "Surya",
       "observed_on": "2026-11-22T02:47:03+05:30",
       "method": "logged-in browser GET /sandbox/api/configs",
@@ -249,7 +250,7 @@
     "gate_check": {
       "status": "PASS",
       "command": "uv run python scripts/gate_check.py --gate 0",
-      "execution_environment": "Configured Python 3.12.7 executable",
+      "execution_environment": "Surya's Mac, uv run",
       "run_by": "Surya",
       "observed_on": "2026-11-22T02:47:06+05:30",
       "output": "Gate 0 evidence validated successfully: 0 - blocked",
@@ -257,11 +258,11 @@
     },
     "status_write": {
       "status": "PASS",
-      "command": "uv run python scripts/status.py --write",
-      "execution_environment": "Configured Python 3.12.7 executable",
+      "command": "uv run python scripts/status.py --check",
+      "execution_environment": "Surya's Mac, uv run",
       "run_by": "Surya",
-      "observed_on": "NOT_RECORDED",
-      "output": "Written STATUS.md",
+      "observed_on": "2026-11-22T02:47:06+05:30",
+      "output": "STATUS.md is current",
       "exit_code": 0
     }
   },
