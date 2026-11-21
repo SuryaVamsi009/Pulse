@@ -100,9 +100,7 @@ def test_main_exits_one_for_wrong_vendor_revision(tmp_path, monkeypatch, capsys)
     guard = load_guard_module()
     vendor_path = fake_vendor_path(tmp_path)
     monkeypatch.setenv("STYX_OPENALGO_PATH", str(vendor_path))
-    monkeypatch.setattr(
-        guard, "get_vendor_revision", lambda path, runner=None: "wrong-revision"
-    )
+    monkeypatch.setattr(guard, "get_vendor_revision", lambda path, runner=None: "wrong-revision")
 
     assert guard.main() == 1
     assert "revision mismatch" in capsys.readouterr().err
@@ -119,10 +117,13 @@ def test_main_exits_one_when_vendor_is_missing(tmp_path, monkeypatch, capsys):
 def test_json_output_records_vendor_revision(capsys):
     guard = load_guard_module()
 
-    assert guard.emit_results(
-        [{"case": "example", "expected": "x", "observed": "x", "ok": True}],
-        guard.EXPECTED_VENDOR_REVISION,
-    ) == 0
+    assert (
+        guard.emit_results(
+            [{"case": "example", "expected": "x", "observed": "x", "ok": True}],
+            guard.EXPECTED_VENDOR_REVISION,
+        )
+        == 0
+    )
 
     output = json.loads(capsys.readouterr().out)
     assert output["vendor_revision"] == guard.EXPECTED_VENDOR_REVISION

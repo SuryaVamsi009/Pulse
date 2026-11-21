@@ -63,9 +63,7 @@ def resolve_vendor_path(cwd: Path | None = None) -> Path:
     )
 
 
-def get_vendor_revision(
-    vendor_path: Path, runner=subprocess.run
-) -> str:
+def get_vendor_revision(vendor_path: Path, runner=subprocess.run) -> str:
     """Read the exact git revision of the selected OpenAlgo checkout."""
     command = ["git", "-C", str(vendor_path), "rev-parse", "HEAD"]
     try:
