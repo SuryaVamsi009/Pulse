@@ -58,7 +58,7 @@ flowchart LR
 
 | Step | State | Recorded | Blockers |
 |------|-------|----------|----------|
-| G0 | BLOCKED | 2026-11-11 | - NSE regular session check not run (Part B)<br/>- Quiet account window check not run (Part B)<br/>- Broker order-book before snapshot not captured (Part B) |
+| G0 | BLOCKED | 2026-11-22 | - NSE regular session check not run (Part B)<br/>- Quiet account window check not run (Part B)<br/>- Broker order-book before snapshot not captured (Part B) |
 | G1 | NOT_RUN | — | — |
 | G2 | NOT_RUN | — | — |
 | G3 | NOT_RUN | — | — |
