@@ -11,104 +11,125 @@ And with Analyzer Mode off:
 - The Fyers order function IS called (negative control proving the test can
   detect a live call)
 
-Run from vendor/openalgo directory:
-    cd vendor/openalgo && uv run python ../../scripts/gate0_guard_check.py
+OpenAlgo is selected in this order:
+1. STYX_OPENALGO_PATH
+2. ./vendor/openalgo relative to the current directory
+3. the current directory when run from vendor/openalgo
+
+These checks stay in this script because the selected checkout and its git
+revision are runtime facts that configuration alone cannot verify.
 """
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-# =============================================================================
-# ISOLATION: Set up temp databases and dummy env vars BEFORE any vendor imports
-# =============================================================================
+EXPECTED_VENDOR_REVISION = "a1b9e32506bce21403a8614dddeed0ab61fd519a"
 
-# Create a temp directory for all databases
-_temp_dir = tempfile.mkdtemp(prefix="gate0_guard_")
-os.environ["DATABASE_URL"] = f"sqlite:///{_temp_dir}/openalgo.db"
-os.environ["SANDBOX_DATABASE_URL"] = f"sqlite:///{_temp_dir}/sandbox.db"
-os.environ["LATENCY_DATABASE_URL"] = f"sqlite:///{_temp_dir}/latency.db"
-os.environ["LOGS_DATABASE_URL"] = f"sqlite:///{_temp_dir}/logs.db"
-os.environ["HEALTH_DATABASE_URL"] = f"sqlite:///{_temp_dir}/health.db"
-os.environ["HISTORIFY_DATABASE_URL"] = f"{_temp_dir}/historify.duckdb"
 
-# Required env vars for auth_db (fail-fast if missing)
-os.environ["API_KEY_PEPPER"] = "a" * 64  # 64 hex chars = 32 bytes
-os.environ["FERNET_SALT"] = "b" * 64
-os.environ["SMTP_KEY_SALT"] = "smtp-test-salt"
+class GuardConfigurationError(RuntimeError):
+    """Raised when the guard cannot establish its required configuration."""
 
-# Other required env vars
-os.environ["BROKER_API_KEY"] = "test_broker_key"
-os.environ["BROKER_API_SECRET"] = "test_broker_secret"
-os.environ["APP_KEY"] = "c" * 64
-os.environ["VALID_BROKERS"] = "fyers"
-os.environ["FLASK_HOST_IP"] = "127.0.0.1"
-os.environ["FLASK_PORT"] = "5000"
-os.environ["FLASK_DEBUG"] = "False"
-os.environ["FLASK_ENV"] = "development"
-os.environ["HOST_SERVER"] = "http://127.0.0.1:5000"
-os.environ["NGROK_ALLOW"] = "FALSE"
 
-# Add vendor/openalgo to sys.path - find it dynamically
-# The script can be run from vendor/openalgo:
-#   cd vendor/openalgo && python ../../scripts/gate0_guard_check.py
-# Or from repo root: python scripts/gate0_guard_check.py
-# In the worktree, vendor is in the main GitHub checkout.
-# On CI, vendor is cloned into repo root.
-_script_path = Path(__file__).resolve()
+def resolve_vendor_path(cwd: Path | None = None) -> Path:
+    """Find the OpenAlgo checkout without using a machine-specific fallback."""
+    current_directory = (cwd or Path.cwd()).resolve()
+    configured_path = os.environ.get("STYX_OPENALGO_PATH")
 
-# Check if we're in vendor/openalgo by looking for database/ directory
-if (_script_path.parent.parent / "database").exists():
-    # Running from vendor/openalgo directory
-    _vendor_path = _script_path.parent.parent
-else:
-    # Running from repo root, check for vendor/openalgo in repo root (CI case)
-    _vendor_path = _script_path.parent.parent / "vendor" / "openalgo"
-    if not _vendor_path.exists():
-        # Fall back to main GitHub checkout (local worktree case)
-        _vendor_path = Path("/Users/suryavamsipichika/GitHub/Pulse/vendor/openalgo")
+    if configured_path:
+        explicit_path = Path(configured_path).expanduser()
+        if not explicit_path.is_absolute():
+            explicit_path = current_directory / explicit_path
+        if not explicit_path.is_dir():
+            raise GuardConfigurationError(
+                f"OpenAlgo vendor not found at STYX_OPENALGO_PATH={explicit_path}"
+            )
+        return explicit_path.resolve()
 
-sys.path.insert(0, str(_vendor_path))
+    repository_path = current_directory / "vendor" / "openalgo"
+    if repository_path.is_dir():
+        return repository_path.resolve()
 
-# =============================================================================
-# NOW import vendor modules (after env vars are set)
-# =============================================================================
+    if current_directory.name == "openalgo" and current_directory.is_dir():
+        return current_directory
 
-# Initialize databases (imports after env vars set - required for isolation)
-from database.auth_db import init_db as init_auth_db  # noqa: E402
-from database.sandbox_db import init_db as init_sandbox_db  # noqa: E402
-from database.settings_db import init_db as init_settings_db  # noqa: E402
+    raise GuardConfigurationError(
+        "OpenAlgo vendor not found. Set STYX_OPENALGO_PATH, run from a repository "
+        "with ./vendor/openalgo, or run this command from vendor/openalgo."
+    )
 
-init_auth_db()
-init_settings_db()
-init_sandbox_db()
 
-# Mock restx_api.schemas before importing services to avoid circular import
-# Create a mock OrderSchema
-mock_order_schema = MagicMock()
-mock_order_schema.load = lambda data: data
+def get_vendor_revision(
+    vendor_path: Path, runner=subprocess.run
+) -> str:
+    """Read the exact git revision of the selected OpenAlgo checkout."""
+    command = ["git", "-C", str(vendor_path), "rev-parse", "HEAD"]
+    try:
+        result = runner(command, capture_output=True, text=True, check=False)
+    except OSError as error:
+        raise GuardConfigurationError(
+            f"Unable to read OpenAlgo vendor revision with git: {error}"
+        ) from error
 
-# Mock the restx_api.schemas module
-sys.modules["restx_api.schemas"] = MagicMock()
-sys.modules["restx_api.schemas"].OrderSchema = lambda: mock_order_schema
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip()
+        suffix = f": {detail}" if detail else ""
+        raise GuardConfigurationError(
+            f"Unable to read OpenAlgo vendor revision from {vendor_path}{suffix}"
+        )
 
-# Also mock restx_api and its submodules to avoid circular imports
-sys.modules["restx_api"] = MagicMock()
-sys.modules["restx_api.options_multiorder"] = MagicMock()
-sys.modules["restx_api.options_multiorder.api"] = MagicMock()
-sys.modules["services.options_multiorder_service"] = MagicMock()
+    revision = result.stdout.strip()
+    if not revision:
+        raise GuardConfigurationError(f"OpenAlgo vendor revision is empty: {vendor_path}")
+    return revision
 
-# Import the services we need to test - import inside functions to avoid
-# circular imports. We'll import them lazily in the test functions.
+
+def require_expected_vendor_revision(vendor_path: Path, runner=subprocess.run) -> str:
+    """Fail closed unless the selected checkout is the Gate 0 audited revision."""
+    revision = get_vendor_revision(vendor_path, runner=runner)
+    if revision != EXPECTED_VENDOR_REVISION:
+        raise GuardConfigurationError(
+            "OpenAlgo vendor revision mismatch: "
+            f"expected {EXPECTED_VENDOR_REVISION}, got {revision}"
+        )
+    return revision
+
+
+def prepare_isolated_environment() -> None:
+    """Set temporary databases and non-secret test values before vendor imports."""
+    temp_dir = tempfile.mkdtemp(prefix="gate0_guard_")
+    os.environ["DATABASE_URL"] = f"sqlite:///{temp_dir}/openalgo.db"
+    os.environ["SANDBOX_DATABASE_URL"] = f"sqlite:///{temp_dir}/sandbox.db"
+    os.environ["LATENCY_DATABASE_URL"] = f"sqlite:///{temp_dir}/latency.db"
+    os.environ["LOGS_DATABASE_URL"] = f"sqlite:///{temp_dir}/logs.db"
+    os.environ["HEALTH_DATABASE_URL"] = f"sqlite:///{temp_dir}/health.db"
+    os.environ["HISTORIFY_DATABASE_URL"] = f"{temp_dir}/historify.duckdb"
+
+    # Required by auth_db; these are test-only values, not broker credentials.
+    os.environ["API_KEY_PEPPER"] = "a" * 64
+    os.environ["FERNET_SALT"] = "b" * 64
+    os.environ["SMTP_KEY_SALT"] = "smtp-test-salt"
+
+    os.environ["BROKER_API_KEY"] = "test_broker_key"
+    os.environ["BROKER_API_SECRET"] = "test_broker_secret"
+    os.environ["APP_KEY"] = "c" * 64
+    os.environ["VALID_BROKERS"] = "fyers"
+    os.environ["FLASK_HOST_IP"] = "127.0.0.1"
+    os.environ["FLASK_PORT"] = "5000"
+    os.environ["FLASK_DEBUG"] = "False"
+    os.environ["FLASK_ENV"] = "development"
+    os.environ["HOST_SERVER"] = "http://127.0.0.1:5000"
+    os.environ["NGROK_ALLOW"] = "FALSE"
+
 
 # =============================================================================
 # TEST HARNESS
 # =============================================================================
 
-# Track calls
 call_log = {
     "fyers_place_order_api": 0,
     "fyers_place_smartorder_api": 0,
@@ -118,13 +139,12 @@ call_log = {
 
 
 def reset_call_log():
-    for k in call_log:
-        call_log[k] = 0
+    for key in call_log:
+        call_log[key] = 0
 
 
 def mock_fyers_place_order_api(*args, **kwargs):
     call_log["fyers_place_order_api"] += 1
-    # Return a mock response like the real function
     mock_resp = MagicMock()
     mock_resp.status = 200
     mock_resp.status_code = 200
@@ -146,7 +166,11 @@ def mock_sandbox_place_order(*args, **kwargs):
 
 def mock_sandbox_place_smart_order(*args, **kwargs):
     call_log["sandbox_place_smart_order"] += 1
-    return True, {"status": "success", "orderid": "sandbox_smart_order_id", "mode": "analyze"}, 200
+    return (
+        True,
+        {"status": "success", "orderid": "sandbox_smart_order_id", "mode": "analyze"},
+        200,
+    )
 
 
 def mock_get_auth_token_broker(api_key):
@@ -158,25 +182,36 @@ def mock_verify_api_key(api_key):
 
 
 def mock_get_analyze_mode():
-    # This will be overridden per test case
     return getattr(mock_get_analyze_mode, "_value", True)
 
 
-# Patch the analyze mode getter (import after env vars - required for isolation)
-import database.settings_db  # noqa: E402
+def initialize_vendor(vendor_path: Path) -> None:
+    """Import and initialize OpenAlgo only after isolation and path selection."""
+    sys.path.insert(0, str(vendor_path))
 
-database.settings_db.get_analyze_mode = mock_get_analyze_mode
+    from database.auth_db import init_db as init_auth_db  # noqa: E402
+    from database.sandbox_db import init_db as init_sandbox_db  # noqa: E402
+    from database.settings_db import init_db as init_settings_db  # noqa: E402
 
-# Patch the auth functions (import after env vars - required for isolation)
-import database.auth_db  # noqa: E402
+    init_auth_db()
+    init_settings_db()
+    init_sandbox_db()
 
-database.auth_db.get_auth_token_broker = mock_get_auth_token_broker
-database.auth_db.verify_api_key = mock_verify_api_key
+    mock_order_schema = MagicMock()
+    mock_order_schema.load = lambda data: data
+    sys.modules["restx_api.schemas"] = MagicMock()
+    sys.modules["restx_api.schemas"].OrderSchema = lambda: mock_order_schema
+    sys.modules["restx_api"] = MagicMock()
+    sys.modules["restx_api.options_multiorder"] = MagicMock()
+    sys.modules["restx_api.options_multiorder.api"] = MagicMock()
+    sys.modules["services.options_multiorder_service"] = MagicMock()
 
+    import database.auth_db  # noqa: E402
+    import database.settings_db  # noqa: E402
 
-# =============================================================================
-# TEST CASES
-# =============================================================================
+    database.settings_db.get_analyze_mode = mock_get_analyze_mode
+    database.auth_db.get_auth_token_broker = mock_get_auth_token_broker
+    database.auth_db.verify_api_key = mock_verify_api_key
 
 
 def run_case(
@@ -192,7 +227,6 @@ def run_case(
     reset_call_log()
     mock_get_analyze_mode._value = analyzer_on
 
-    # Import services lazily to avoid circular imports
     if order_func_name == "place_order":
         from services.place_order_service import place_order as order_func
     elif order_func_name == "place_smart_order":
@@ -204,7 +238,6 @@ def run_case(
     else:
         raise ValueError(f"Unknown order function: {order_func_name}")
 
-    # Apply patches for this case
     with (
         patch("services.sandbox_service.sandbox_place_order", mock_sandbox_place_order),
         patch(
@@ -225,11 +258,11 @@ def run_case(
             observed_fyers = (
                 call_log["fyers_place_order_api"] + call_log["fyers_place_smartorder_api"]
             )
-        except Exception as e:
+        except Exception as error:
             return {
                 "case": case_name,
                 "expected": f"sandbox={expected_sandbox}, fyers={expected_fyers}",
-                "observed": f"ERROR: {e}",
+                "observed": f"ERROR: {error}",
                 "ok": False,
             }
 
@@ -242,11 +275,9 @@ def run_case(
     }
 
 
-def main():
-    # Create a test API key
+def run_guard_cases():
+    """Run the four Analyzer Mode routes and the live-mode negative control."""
     test_api_key = "test_api_key_123"
-
-    # Base order data for NSE RELIANCE BUY 1 MIS MARKET
     base_order = {
         "symbol": "RELIANCE",
         "exchange": "NSE",
@@ -256,31 +287,11 @@ def main():
         "product": "MIS",
         "strategy": "test_strategy",
     }
+    smart_order = {**base_order, "position_size": 0}
+    basket_order = {"apikey": test_api_key, "strategy": "test_strategy", "orders": [base_order]}
+    split_order = {**base_order, "total_quantity": 1, "splitsize": 1}
 
-    # Smart order data
-    smart_order = {
-        **base_order,
-        "position_size": 0,
-    }
-
-    # Basket order data (one order)
-    basket_order = {
-        "apikey": test_api_key,
-        "strategy": "test_strategy",
-        "orders": [base_order],
-    }
-
-    # Split order data
-    split_order = {
-        **base_order,
-        "total_quantity": 1,
-        "splitsize": 1,
-    }
-
-    results = []
-
-    # Case 1: Analyzer ON, placeorder
-    results.append(
+    return [
         run_case(
             "analyzer_on_placeorder",
             analyzer_on=True,
@@ -289,11 +300,7 @@ def main():
             expected_sandbox=1,
             expected_fyers=0,
             api_key=test_api_key,
-        )
-    )
-
-    # Case 2: Analyzer ON, placesmartorder
-    results.append(
+        ),
         run_case(
             "analyzer_on_placesmartorder",
             analyzer_on=True,
@@ -302,11 +309,7 @@ def main():
             expected_sandbox=1,
             expected_fyers=0,
             api_key=test_api_key,
-        )
-    )
-
-    # Case 3: Analyzer ON, basketorder with one order
-    results.append(
+        ),
         run_case(
             "analyzer_on_basketorder",
             analyzer_on=True,
@@ -315,11 +318,7 @@ def main():
             expected_sandbox=1,
             expected_fyers=0,
             api_key=test_api_key,
-        )
-    )
-
-    # Case 4: Analyzer ON, splitorder
-    results.append(
+        ),
         run_case(
             "analyzer_on_splitorder",
             analyzer_on=True,
@@ -328,11 +327,7 @@ def main():
             expected_sandbox=1,
             expected_fyers=0,
             api_key=test_api_key,
-        )
-    )
-
-    # Case 5: Analyzer OFF, placeorder (negative control - MUST call Fyers)
-    results.append(
+        ),
         run_case(
             "analyzer_off_placeorder_negative_control",
             analyzer_on=False,
@@ -341,19 +336,32 @@ def main():
             expected_sandbox=0,
             expected_fyers=1,
             api_key=test_api_key,
-        )
-    )
+        ),
+    ]
 
-    # Print results as JSON lines
+
+def emit_results(results, vendor_revision: str) -> int:
+    """Print JSON results, including the audited vendor revision."""
     all_ok = True
-    for r in results:
-        print(json.dumps(r))
-        if not r["ok"]:
-            all_ok = False
+    for result in results:
+        output = {**result, "vendor_revision": vendor_revision}
+        print(json.dumps(output))
+        all_ok = all_ok and result["ok"]
+    return 0 if all_ok else 1
 
-    # Exit with error code if any case failed
-    sys.exit(0 if all_ok else 1)
+
+def main() -> int:
+    try:
+        vendor_path = resolve_vendor_path()
+        vendor_revision = require_expected_vendor_revision(vendor_path)
+        prepare_isolated_environment()
+        initialize_vendor(vendor_path)
+    except GuardConfigurationError as error:
+        print(json.dumps({"error": str(error)}), file=sys.stderr)
+        return 1
+
+    return emit_results(run_guard_cases(), vendor_revision)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
