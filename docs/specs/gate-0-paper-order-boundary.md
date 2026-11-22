@@ -24,7 +24,9 @@ Analyzer Mode isolation, current provider terms, and the installed-version order
 1. Install/configure the selected existing tools and read the installed-version OpenAlgo documentation and the connected broker's documentation. Establish how Analyzer Mode handles orders and how a read-only broker order-book check is performed. If isolation or read visibility cannot be established, Part A is **BLOCKED**.
 2. Record the OpenAlgo and relevant tool versions, selected provider/instrument/environment, Analyzer Mode state, ₹1,00,000 (1 lakh) capital and 1× leverage setting. Do not record credentials.
 3. Search all Pulse-owned source and configuration for direct broker-order call sites. Separately audit the installed OpenAlgo version's active execution registration and routing path. Prove no real-broker execution path is registered or invoked; unused vendor implementation code alone is not evidence that a path is active.
-4. Confirm the configured route is in Analyzer Mode before any order. Do not submit the test order unless all Part A isolation checks pass.
+4. Audit the installed OpenAlgo for `force_live=True` or other bypasses of `get_analyze_mode()`. List every call site and state whether Pulse can reach it. OpenAlgo strategy and OpenScript runs can send live orders regardless of Analyzer Mode; Gate 0 covers the API order routes only, and the claim does not extend to strategy runs.
+5. Confirm the configured route is in Analyzer Mode before any order. Do not submit the test order unless all Part A isolation checks pass.
+6. Control: Pulse must never create, start or schedule an OpenAlgo strategy or OpenScript run. Surya records, before Part B, that the Strategies page of the local OpenAlgo lists none (Surya-observed, with time).
 
 ## Part B — regular NSE cash-equity session only
 
