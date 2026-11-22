@@ -180,6 +180,10 @@
       ],
       "note": "All five cases pass. Negative control (Analyzer OFF) confirms Fyers function is called, proving the test can detect live calls."
     },
+    "force_live_bypass_audit": {
+      "status": "NOT_RUN",
+      "note": "Audit of force_live=True bypass in OpenAlgo. References: services/place_order_service.py:167 (Analyzer Mode bypass), services/strategy_module/order_dispatch.py:551-554 (live strategy run bypass), openscript_host/openscript_runner.py:2466-2475 (OpenScript runner)."
+    },
     "broker_orderbook_visibility_docs": {
       "status": "DOCUMENTED",
       "read_only_check": "POST /api/v1/orderbook with an OpenAlgo API key",
@@ -267,6 +271,7 @@
     }
   },
   "blockers": [
+    "force_live bypass audit not completed (strategy-module live orders ignore Analyzer Mode)",
     "NSE regular session check not run (Part B)",
     "Quiet account window check not run (Part B)",
     "Broker order-book before snapshot not captured (Part B)",

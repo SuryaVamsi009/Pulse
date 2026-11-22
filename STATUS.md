@@ -58,7 +58,7 @@ flowchart LR
 
 | Step | State | Recorded | Blockers |
 |------|-------|----------|----------|
-| G0 | BLOCKED | 2026-11-22 | - NSE regular session check not run (Part B)<br/>- Quiet account window check not run (Part B)<br/>- Broker order-book before snapshot not captured (Part B) |
+| G0 | BLOCKED | 2026-11-22 | - force_live bypass audit not completed (strategy-module live orders ignore Analyzer Mode)<br/>- NSE regular session check not run (Part B)<br/>- Quiet account window check not run (Part B) |
 | G1 | NOT_RUN | — | — |
 | G2 | NOT_RUN | — | — |
 | G3 | NOT_RUN | — | — |
@@ -72,4 +72,4 @@ flowchart LR
 | R5 | NOT_RUN | — | — |
 | R6 | NOT_RUN | — | — |
 
-**Next:** G0 Scope and safety (BLOCKED) — NSE regular session check not run (Part B)
+**Next:** G0 Scope and safety (BLOCKED) — force_live bypass audit not completed (strategy-module live orders ignore Analyzer Mode)
